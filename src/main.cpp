@@ -5,7 +5,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 String cmd = "";
 bool wait = false, isConnect = false;
-int currIndex = 0, animCount = 0;
+int currIndex = 0, animCount = 0, timeout = 0;
 
 void writeLcd(String text)
 {
@@ -30,10 +30,11 @@ void writeLcd(String text)
 
 void cmdProcessor(String cmd)
 {
-  if (cmd == "STATUS")
+  if (cmd == "OK")
   {
-    Serial.println("UP");
+    timeout = 0;
     isConnect = true;
+    Serial.println("STATUS");
     return;
   }
   if (cmd.indexOf("IP ") == 0)
@@ -42,6 +43,7 @@ void cmdProcessor(String cmd)
     writeLcd("IP ADDR:");
     writeLcd(cmd);
     isConnect = true;
+    Serial.println("STATUS");
     return;
   }
   if (cmd.indexOf("SEND ") == 0)
@@ -49,14 +51,58 @@ void cmdProcessor(String cmd)
     cmd.remove(0, 5);
     writeLcd(cmd);
     isConnect = true;
+    Serial.println("STATUS");
+    return;
+  }
+  if (cmd == "CLEAR")
+  {
+    lcd.clear();
+    isConnect = true;
+    Serial.println("STATUS");
     return;
   }
 }
 
+void timeoutProcess(int delayTimeMs, int maxTimeMs)
+{
+  delay(delayTimeMs);
+  if (isConnect)
+  {
+    timeout += delayTimeMs;
+    if (timeout > maxTimeMs)
+    {
+      animCount = 0;
+      timeout = 0;
+      isConnect = false;
+    }
+  }
+}
+
+int waitAnim(int counter)
+{
+  switch (counter)
+  {
+  case 0:
+    writeLcd("Waiting.");
+    break;
+  case 1:
+    writeLcd("Waiting..");
+    break;
+  case 2:
+    writeLcd("Waiting...");
+    break;
+  default:
+    break;
+  }
+  writeLcd("System not ready");
+  counter++;
+  if (counter > 2)
+    return 0;
+  return counter;
+}
+
 void setup()
 {
-  // pinMode(6, INPUT);
-  // pinMode(13, OUTPUT);
   lcd.init();
   lcd.backlight();
   lcd.clear();
@@ -67,32 +113,11 @@ void setup()
 
 void loop()
 {
-  if (!Serial.available())
-  {
-    if (!isConnect)
-    {
-      switch (animCount)
-      {
-      case 0:
-        writeLcd("Waiting.");
-        break;
-      case 1:
-        writeLcd("Waiting..");
-        break;
-      case 2:
-        writeLcd("Waiting...");
-        break;
-      default:
-        break;
-      }
-      writeLcd("System not ready");
-      Serial.println("UP");
-      animCount++;
-      if (animCount > 2)
-        animCount = 0;
-      delay(250);
-    }
-  }
+  if (!Serial.available() && !isConnect)
+    animCount = waitAnim(animCount);
+
+  if (!isConnect)
+    Serial.println("UP");
 
   if (Serial.availableForWrite() > 0)
   {
@@ -100,4 +125,6 @@ void loop()
     cmd.trim();
     cmdProcessor(cmd);
   }
+
+  timeoutProcess(100, 1500);
 }
