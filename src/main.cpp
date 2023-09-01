@@ -3,15 +3,28 @@
 
 // change value here
 #define BAUDRATE 19200
-#define DELAY_MS 100
-#define MAX_TIMEOUT 1
+#define DELAY_MS 1000
+#define TIMEOUT_MS 5000
+#define ANIM_MS 1000
 
 // using PCF8574 for LCD I2C adapter where default address is 0x27
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 String cmd = "";
 bool wait = false, isConnect = false;
-int currIndex = 0, animCount = 0, timeout = 0;
+// counter
+int currIndex = 0, animCount = 0;
+// specific use case timing
+unsigned long animTimer = 0, cmdTimer = 0;
+// used for timer
+unsigned long _globalLastTime = 0, _globalDeltaTime = 0;
+
+void updateDeltaTime()
+{
+  unsigned long currTime = millis();
+  _globalDeltaTime = currTime - _globalLastTime;
+  _globalLastTime = currTime;
+}
 
 void writeLcd(String text)
 {
@@ -47,7 +60,7 @@ void cmdFromService(String cmd)
   {
     if (cmd == "OK")
     {
-      timeout = 0;
+      cmdTimer = 0;
     }
     else if (cmd.indexOf("IP ") == 0)
     {
@@ -68,43 +81,57 @@ void cmdFromService(String cmd)
   }
 }
 
-void timeoutProcess(int delayTimeMs, int maxFail)
+void timeoutProcess(HardwareSerial Serial, unsigned long delayTimeMs, unsigned long maxTimeout)
 {
-  delay(delayTimeMs);
+  cmdTimer += _globalDeltaTime;
   if (isConnect)
   {
-    Serial.println("STATUS");
-    timeout++;
-    if (timeout > maxFail)
+    if (cmdTimer > delayTimeMs)
+    {
+      Serial.println("STATUS");
+      cmdTimer = 0;
+    }
+    if (cmdTimer > maxTimeout)
     {
       animCount = 0;
-      timeout = 0;
+      cmdTimer = 0;
       isConnect = false;
     }
   }
+  else
+  {
+    cmdTimer = 0;
+  }
 }
 
-int waitAnim(int counter)
+void waitAnim(unsigned long animTimerMax)
 {
-  switch (counter)
+  animTimer += _globalDeltaTime;
+  if (animTimer > animTimerMax)
   {
-  case 0:
-    writeLcd("Waiting.");
-    break;
-  case 1:
-    writeLcd("Waiting..");
-    break;
-  case 2:
-    writeLcd("Waiting...");
-    break;
-  default:
-    break;
+    switch (animCount)
+    {
+    case 0:
+      writeLcd("Waiting");
+      break;
+    case 1:
+      writeLcd("Waiting.");
+      break;
+    case 2:
+      writeLcd("Waiting..");
+      break;
+    case 3:
+      writeLcd("Waiting...");
+      break;
+    default:
+      break;
+    }
+    writeLcd("System not ready");
+    animCount++;
+    animTimer = 0;
   }
-  writeLcd("System not ready");
-  counter++;
-  if (counter > 2)
-    return 0;
-  return counter;
+  if (animCount > 3)
+    animCount = 0;
 }
 
 void setup()
@@ -119,8 +146,10 @@ void setup()
 
 void loop()
 {
+  updateDeltaTime();
+
   if (!Serial.available() && !isConnect)
-    animCount = waitAnim(animCount);
+    waitAnim(ANIM_MS);
 
   if (!isConnect)
     Serial.println("UP");
@@ -130,7 +159,6 @@ void loop()
     cmd = Serial.readString();
     cmd.trim();
     cmdFromService(cmd);
+    timeoutProcess(Serial, DELAY_MS, TIMEOUT_MS);
   }
-
-  timeoutProcess(DELAY_MS, MAX_TIMEOUT);
 }
