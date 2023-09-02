@@ -1,11 +1,32 @@
 #include <Arduino.h>
 #include <LiquidCrystal_I2C.h>
 
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+// change value here
+#define BAUDRATE 19200
+#define DELAY_MS 1000
+#define TIMEOUT_MS 5000
+#define ANIM_MS 1000
+#define LCD_COLS 16
+#define LCD_ROWS 2
+
+// using PCF8574 for LCD I2C adapter where default address is 0x27
+LiquidCrystal_I2C lcd(0x27, LCD_COLS, LCD_ROWS);
 
 String cmd = "";
 bool wait = false, isConnect = false;
-int currIndex = 0, animCount = 0, timeout = 0;
+// counter
+int currIndex = 0, animCount = 0;
+// specific use case timing
+unsigned long animTimer = 0, cmdTimer = 0, timeoutTimer = 0;
+// used for timer
+unsigned long _globalLastTime = 0, _globalDeltaTime = 0;
+
+void updateDeltaTime()
+{
+  unsigned long currTime = millis();
+  _globalDeltaTime = currTime - _globalLastTime;
+  _globalLastTime = currTime;
+}
 
 void writeLcd(String text)
 {
@@ -27,78 +48,101 @@ void writeLcd(String text)
   }
   lcd.print(in_txt);
 }
-
-void cmdProcessor(String cmd)
+// command from and to cli
+void cmdFromCli(String cmd)
 {
-  if (cmd == "OK")
+  if (cmd == "STATUS")
+    Serial.println("ALIVE");
+}
+
+// command from service
+void cmdFromService(String cmd)
+{
+  if (cmd == "ALIVE")
   {
-    timeout = 0;
+    timeoutTimer = 0;
     isConnect = true;
-    Serial.println("STATUS");
-    return;
   }
   if (cmd.indexOf("IP ") == 0)
   {
     cmd.remove(0, 3);
     writeLcd("IP ADDR:");
     writeLcd(cmd);
+    Serial.println("OK");
+    timeoutTimer = 0;
     isConnect = true;
-    Serial.println("STATUS");
-    return;
   }
   if (cmd.indexOf("SEND ") == 0)
   {
     cmd.remove(0, 5);
     writeLcd(cmd);
-    isConnect = true;
-    Serial.println("STATUS");
-    return;
+    Serial.println("OK");
   }
   if (cmd == "CLEAR")
   {
     lcd.clear();
-    isConnect = true;
-    Serial.println("STATUS");
+    Serial.println("OK");
+  }
+}
+
+// command to service
+void cmdToService(unsigned long delayTimeMs, unsigned long maxTimeout)
+{
+  if (delayTimeMs > maxTimeout)
+  {
     return;
   }
-}
-
-void timeoutProcess(int delayTimeMs, int maxTimeMs)
-{
-  delay(delayTimeMs);
-  if (isConnect)
+  cmdTimer += _globalDeltaTime;
+  timeoutTimer += _globalDeltaTime;
+  if (cmdTimer > delayTimeMs)
   {
-    timeout += delayTimeMs;
-    if (timeout > maxTimeMs)
+    if (isConnect)
     {
-      animCount = 0;
-      timeout = 0;
-      isConnect = false;
+      Serial.println("WHEREIP");
     }
+    else
+    {
+      Serial.println("STATUS");
+    }
+    cmdTimer = 0;
+  }
+  if (isConnect && timeoutTimer > maxTimeout)
+  {
+    animCount = 0;
+    cmdTimer = 0;
+    timeoutTimer = 0;
+    isConnect = false;
   }
 }
 
-int waitAnim(int counter)
+void waitAnim(unsigned long animTimerMax)
 {
-  switch (counter)
+  animTimer += _globalDeltaTime;
+  if (animTimer > animTimerMax)
   {
-  case 0:
-    writeLcd("Waiting.");
-    break;
-  case 1:
-    writeLcd("Waiting..");
-    break;
-  case 2:
-    writeLcd("Waiting...");
-    break;
-  default:
-    break;
+    switch (animCount)
+    {
+    case 0:
+      writeLcd("Waiting");
+      break;
+    case 1:
+      writeLcd("Waiting.");
+      break;
+    case 2:
+      writeLcd("Waiting..");
+      break;
+    case 3:
+      writeLcd("Waiting...");
+      break;
+    default:
+      break;
+    }
+    writeLcd("System not ready");
+    animCount++;
+    animTimer = 0;
   }
-  writeLcd("System not ready");
-  counter++;
-  if (counter > 2)
-    return 0;
-  return counter;
+  if (animCount > 3)
+    animCount = 0;
 }
 
 void setup()
@@ -106,25 +150,35 @@ void setup()
   lcd.init();
   lcd.backlight();
   lcd.clear();
-  Serial.begin(19200);
+  pinMode(13, OUTPUT);
+  Serial.begin(BAUDRATE);
   while (!Serial)
     ;
 }
 
 void loop()
 {
-  if (!Serial.available() && !isConnect)
-    animCount = waitAnim(animCount);
+  updateDeltaTime();
+  cmdToService(DELAY_MS, TIMEOUT_MS);
 
   if (!isConnect)
-    Serial.println("UP");
+  {
+    waitAnim(ANIM_MS);
+    digitalWrite(13, LOW);
+  }
+
+  if (isConnect)
+  {
+    digitalWrite(13, HIGH);
+  }
 
   if (Serial.availableForWrite() > 0)
   {
     cmd = Serial.readString();
     cmd.trim();
-    cmdProcessor(cmd);
+    if (cmd != "")
+    {
+      cmdFromService(cmd);
+    }
   }
-
-  timeoutProcess(100, 1500);
 }
