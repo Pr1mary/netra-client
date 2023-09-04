@@ -12,7 +12,7 @@
 // using PCF8574 for LCD I2C adapter where default address is 0x27
 LiquidCrystal_I2C lcd(0x27, LCD_COLS, LCD_ROWS);
 
-String cmd = "";
+String last_text = "";
 bool wait = false, isConnect = false;
 // counter
 int currIndex = 0, animCount = 0;
@@ -20,6 +20,25 @@ int currIndex = 0, animCount = 0;
 unsigned long animTimer = 0, cmdTimer = 0, timeoutTimer = 0;
 // used for timer
 unsigned long _globalLastTime = 0, _globalDeltaTime = 0;
+// left and right lcd logo
+byte Right[] = {
+    B11111,
+    B10111,
+    B10011,
+    B10001,
+    B10001,
+    B10011,
+    B10111,
+    B11111};
+byte Left[] = {
+    B11111,
+    B11101,
+    B11001,
+    B10001,
+    B10001,
+    B11001,
+    B11101,
+    B11111};
 
 void updateDeltaTime()
 {
@@ -31,10 +50,10 @@ void updateDeltaTime()
 void writeLcd(String text)
 {
   String in_txt = text;
-  if (in_txt.length() > 16)
+  if (in_txt.length() > LCD_COLS)
   {
-    in_txt.remove(13);
-    in_txt += "...";
+    in_txt.remove(LCD_COLS - 1);
+    // in_txt += "-";
   }
   lcd.setCursor(0, currIndex);
   if (currIndex == 0)
@@ -47,6 +66,11 @@ void writeLcd(String text)
     currIndex--;
   }
   lcd.print(in_txt);
+  if (in_txt.length() > LCD_COLS)
+  {
+    lcd.setCursor(16, currIndex);
+    lcd.write(1);
+  }
 }
 // command from and to cli
 void cmdFromCli(String cmd)
@@ -72,16 +96,29 @@ void cmdFromService(String cmd)
     timeoutTimer = 0;
     isConnect = true;
   }
+  if (cmd.indexOf("MOTD ") == 0)
+  {
+    cmd.remove(0, 5);
+    writeLcd("MOTD:");
+    writeLcd(cmd);
+    Serial.println("OK");
+    timeoutTimer = 0;
+    isConnect = true;
+  }
   if (cmd.indexOf("SEND ") == 0)
   {
     cmd.remove(0, 5);
     writeLcd(cmd);
     Serial.println("OK");
+    timeoutTimer = 0;
+    isConnect = true;
   }
   if (cmd == "CLEAR")
   {
     lcd.clear();
     Serial.println("OK");
+    timeoutTimer = 0;
+    isConnect = true;
   }
 }
 
@@ -99,6 +136,7 @@ void cmdToService(unsigned long delayTimeMs, unsigned long maxTimeout)
     if (isConnect)
     {
       Serial.println("WHEREIP");
+      // Serial.println("MOTD");
     }
     else
     {
@@ -149,6 +187,8 @@ void setup()
 {
   lcd.init();
   lcd.backlight();
+  lcd.createChar(0, Right);
+  lcd.createChar(1, Left);
   lcd.clear();
   pinMode(13, OUTPUT);
   Serial.begin(BAUDRATE);
@@ -174,7 +214,7 @@ void loop()
 
   if (Serial.availableForWrite() > 0)
   {
-    cmd = Serial.readString();
+    String cmd = Serial.readString();
     cmd.trim();
     if (cmd != "")
     {
