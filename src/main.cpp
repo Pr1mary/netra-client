@@ -13,7 +13,7 @@
 LiquidCrystal_I2C lcd(0x27, LCD_COLS, LCD_ROWS);
 
 String last_text = "";
-bool wait = false, isConnect = false;
+bool wait = false, isConnect = false, isFromCli = false;
 // counter
 int currIndex = 0, animCount = 0;
 // specific use case timing
@@ -76,7 +76,10 @@ void writeLcd(String text)
 void cmdFromCli(String cmd)
 {
   if (cmd == "STATUS")
+  {
     Serial.println("ALIVE");
+    isFromCli = true;
+  }
 }
 
 // command from service
@@ -133,7 +136,11 @@ void cmdToService(unsigned long delayTimeMs, unsigned long maxTimeout)
   timeoutTimer += _globalDeltaTime;
   if (cmdTimer > delayTimeMs)
   {
-    if (isConnect)
+    if (isFromCli)
+    {
+      isFromCli = false;
+    }
+    else if (isConnect)
     {
       Serial.println("WHEREIP");
       // Serial.println("MOTD");
@@ -218,6 +225,7 @@ void loop()
     cmd.trim();
     if (cmd != "")
     {
+      cmdFromCli(cmd);
       cmdFromService(cmd);
     }
   }
